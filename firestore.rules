@@ -1,0 +1,478 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    // Bootstrapped Admin (rk3171998@gmail.com with verified email check per Pillar 5)
+    function isAdmin() {
+      return isSignedIn() &&
+             'email' in request.auth.token &&
+             'email_verified' in request.auth.token &&
+             request.auth.token.email == 'rk3171998@gmail.com' &&
+             request.auth.token.email_verified == true;
+    }
+
+    // Validation Helper: UserProfile
+    function isValidUserProfile(data, targetUid) {
+      return data.userId is string && data.userId == targetUid && isValidId(data.userId) &&
+             data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 50 &&
+             data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 50 &&
+             data.birthDate is string && data.birthDate.size() >= 4 && data.birthDate.size() <= 20 &&
+             data.age is int && data.age >= 18 && data.age <= 100 &&
+             data.gender is string && (data.gender == 'Male' || data.gender == 'Female' || data.gender == 'Other') &&
+             data.bio is string && data.bio.size() <= 500 &&
+             data.interests is list && data.interests.size() <= 10 && (data.interests.size() == 0 || (data.interests[0] is string && data.interests[0].size() <= 40)) &&
+             data.photoBase64 is string && data.photoBase64.size() <= 700000 &&
+             (!('galleryPhotos' in data) || (data.galleryPhotos is list && data.galleryPhotos.size() <= 6)) &&
+             (!('isProfileVerified' in data) || data.isProfileVerified is bool) &&
+             (!('verificationStatus' in data) || (data.verificationStatus is string && (data.verificationStatus == 'None' || data.verificationStatus == 'Pending' || data.verificationStatus == 'Verified' || data.verificationStatus == 'Rejected'))) &&
+             (!('verificationVideoFrames' in data) || (data.verificationVideoFrames is list && data.verificationVideoFrames.size() <= 12)) &&
+             (!('verificationSubmittedAt' in data) || (data.verificationSubmittedAt is int && data.verificationSubmittedAt >= 0)) &&
+             (data.latitude is float || data.latitude is int) && data.latitude >= -90 && data.latitude <= 90 &&
+             (data.longitude is float || data.longitude is int) && data.longitude >= -180 && data.longitude <= 180 &&
+             data.locationName is string && data.locationName.size() >= 1 && data.locationName.size() <= 100 &&
+             data.isPremium is bool &&
+             data.premiumPlan is string && (data.premiumPlan == 'Free' || data.premiumPlan == 'Monthly' || data.premiumPlan == 'Yearly' || data.premiumPlan == 'FreeReward1Day') &&
+             data.premiumExpiresAt is int && data.premiumExpiresAt >= 0 &&
+             (!('lastPaymentAmountInr' in data) || (data.lastPaymentAmountInr is int && data.lastPaymentAmountInr >= 0)) &&
+             (!('lastPaymentDateMs' in data) || (data.lastPaymentDateMs is int && data.lastPaymentDateMs >= 0)) &&
+             (!('lastUpiTxnId' in data) || (data.lastUpiTxnId is string && data.lastUpiTxnId.size() <= 64)) &&
+             (!('paymentStatus' in data) || (data.paymentStatus is string && (data.paymentStatus == 'None' || data.paymentStatus == 'PendingVerification' || data.paymentStatus == 'Verified' || data.paymentStatus == 'Rejected'))) &&
+             (!('pendingPlan' in data) || (data.pendingPlan is string && data.pendingPlan.size() <= 30)) &&
+             data.dailyMessageCount is int && data.dailyMessageCount >= 0 &&
+             (!('dailyRandomFindCount' in data) || (data.dailyRandomFindCount is int && data.dailyRandomFindCount >= 0)) &&
+             (!('lastRandomFindDate' in data) || (data.lastRandomFindDate is string && data.lastRandomFindDate.size() <= 20)) &&
+             data.streakDays is int && data.streakDays >= 0 && data.streakDays <= 7 &&
+             data.todayUsageSeconds is int && data.todayUsageSeconds >= 0 && data.todayUsageSeconds <= 86400 &&
+             data.lastUsageDate is string && data.lastUsageDate.size() <= 20 &&
+             data.lastStreakCompletedDate is string && data.lastStreakCompletedDate.size() <= 40 &&
+             data.role is string && (data.role == 'user' || (data.role == 'admin' && isAdmin())) &&
+             data.visibility is string && (data.visibility == 'public' || data.visibility == 'hidden') &&
+             (!('allowRandomMeet' in data) || data.allowRandomMeet is bool) &&
+             (!('isOnline' in data) || data.isOnline is bool) &&
+             (!('lastActiveAtMs' in data) || (data.lastActiveAtMs is int && data.lastActiveAtMs >= 0)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Validation Helper: Like
+    function isValidLike(data) {
+      return data.fromUserId is string && data.fromUserId == request.auth.uid && isValidId(data.fromUserId) &&
+             data.toUserId is string && isValidId(data.toUserId) && data.toUserId != request.auth.uid &&
+             data.fromUserName is string && data.fromUserName.size() >= 1 && data.fromUserName.size() <= 100 &&
+             data.toUserName is string && data.toUserName.size() >= 1 && data.toUserName.size() <= 100 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // Validation Helper: Block
+    function isValidBlock(data) {
+      return data.userId is string && data.userId == request.auth.uid && isValidId(data.userId) &&
+             data.blockedUserId is string && isValidId(data.blockedUserId) && data.blockedUserId != request.auth.uid &&
+             data.blockedUserName is string && data.blockedUserName.size() >= 1 && data.blockedUserName.size() <= 100 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // Validation Helper: Message (supports text, photo sharing, and audio/video call events)
+    function isValidMessage(data) {
+      return data.chatId is string && data.chatId.size() >= 3 && data.chatId.size() <= 128 &&
+             data.senderId is string && data.senderId == request.auth.uid && isValidId(data.senderId) &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+             data.receiverId is string && isValidId(data.receiverId) && data.receiverId != request.auth.uid &&
+             data.receiverName is string && data.receiverName.size() >= 1 && data.receiverName.size() <= 100 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+             (!('photoBase64' in data) || (data.photoBase64 is string && data.photoBase64.size() <= 700000)) &&
+             (!('messageType' in data) || (data.messageType is string && (data.messageType == 'text' || data.messageType == 'photo' || data.messageType == 'audio_call' || data.messageType == 'video_call'))) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // Validation Helper: CallStream (supports real-time audio PCM & video JPEG frame packets)
+    function isValidCallStream(data, targetUid) {
+      return data.userId is string && data.userId == targetUid && isValidId(data.userId) &&
+             data.partnerId is string && isValidId(data.partnerId) &&
+             data.callMode is string && (data.callMode == 'AUDIO' || data.callMode == 'VIDEO') &&
+             data.isActive is bool &&
+             data.seq is int && data.seq >= 0 &&
+             (!('videoFrameBase64' in data) || (data.videoFrameBase64 is string && data.videoFrameBase64.size() <= 250000)) &&
+             (!('audioChunkBase64' in data) || (data.audioChunkBase64 is string && data.audioChunkBase64.size() <= 250000)) &&
+             (!('micLevel' in data) || (data.micLevel is int && data.micLevel >= 0 && data.micLevel <= 100)) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Validation Helper: RandomChatQueue
+    function isValidRandomChatQueue(data, targetUid) {
+      return data.userId is string && data.userId == targetUid && isValidId(data.userId) &&
+             data.gender is string && (data.gender == 'Male' || data.gender == 'Female' || data.gender == 'Other') &&
+             data.age is int && data.age >= 18 && data.age <= 100 &&
+             (data.latitude is float || data.latitude is int) && data.latitude >= -90 && data.latitude <= 90 &&
+             (data.longitude is float || data.longitude is int) && data.longitude >= -180 && data.longitude <= 180 &&
+             data.preferredGender is string && (data.preferredGender == 'All' || data.preferredGender == 'Male' || data.preferredGender == 'Female') &&
+             data.preferredMinAge is int && data.preferredMinAge >= 18 && data.preferredMinAge <= 65 &&
+             data.preferredMaxAge is int && data.preferredMaxAge >= data.preferredMinAge && data.preferredMaxAge <= 65 &&
+             data.preferredMaxDistanceKm is int && data.preferredMaxDistanceKm >= 10 && data.preferredMaxDistanceKm <= 25000 &&
+             data.status is string && (data.status == 'waiting' || data.status == 'matched') &&
+             data.matchedSessionId is string && data.matchedSessionId.size() <= 128 &&
+             (data.status == 'waiting' || isValidId(data.matchedSessionId)) &&
+             data.matchedPartnerId is string && data.matchedPartnerId.size() <= 128 &&
+             (data.status == 'waiting' || (isValidId(data.matchedPartnerId) && data.matchedPartnerId != targetUid)) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Validation Helper: RandomChatSession
+    function isValidRandomChatSession(data) {
+      return data.userAId is string && isValidId(data.userAId) &&
+             data.userBId is string && isValidId(data.userBId) && data.userBId != data.userAId &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.participantIds[0] == data.userAId && data.participantIds[1] == data.userBId &&
+             data.userAGender is string && (data.userAGender == 'Male' || data.userAGender == 'Female' || data.userAGender == 'Other') &&
+             data.userBGender is string && (data.userBGender == 'Male' || data.userBGender == 'Female' || data.userBGender == 'Other') &&
+             data.status is string && (data.status == 'active' || data.status == 'ended') &&
+             data.endedByUserId is string && data.endedByUserId.size() <= 128 &&
+             (data.endedByUserId == '' || isValidId(data.endedByUserId)) &&
+             data.userAConsentName is bool && data.userBConsentName is bool &&
+             data.userAConsentAge is bool && data.userBConsentAge is bool &&
+             data.userAConsentPhoto is bool && data.userBConsentPhoto is bool &&
+             data.userAConsentProfile is bool && data.userBConsentProfile is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Validation Helper: RandomChatMessage
+    function isValidRandomChatMessage(data) {
+      return data.sessionId is string && isValidId(data.sessionId) &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.participantIds[0] is string && data.participantIds[1] is string &&
+             data.senderId is string && data.senderId == request.auth.uid && isValidId(data.senderId) &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+             data.messageType is string && (data.messageType == 'text' || data.messageType == 'system') &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // 1. Profiles Collection
+    match /profiles/{profileId} {
+      allow get: if isSignedIn() && isValidId(profileId) && (request.auth.uid == profileId || isAdmin() || (resource != null && existing().visibility == 'public'));
+      allow list: if isSignedIn() && (existing().visibility == 'public' || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(profileId) &&
+                       request.auth.uid == profileId &&
+                       incoming().keys().hasAll([
+                         'userId', 'firstName', 'lastName', 'birthDate', 'age', 'gender',
+                         'bio', 'interests', 'photoBase64', 'latitude', 'longitude',
+                         'locationName', 'isPremium', 'premiumPlan', 'premiumExpiresAt',
+                         'dailyMessageCount', 'streakDays', 'todayUsageSeconds',
+                         'lastUsageDate', 'lastStreakCompletedDate', 'role',
+                         'visibility', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'firstName', 'lastName', 'birthDate', 'age', 'gender',
+                         'bio', 'interests', 'photoBase64', 'galleryPhotos',
+                         'isProfileVerified', 'verificationStatus', 'verificationVideoFrames', 'verificationSubmittedAt',
+                         'latitude', 'longitude',
+                         'locationName', 'isPremium', 'premiumPlan', 'premiumExpiresAt',
+                         'lastPaymentAmountInr', 'lastPaymentDateMs',
+                         'lastUpiTxnId', 'paymentStatus', 'pendingPlan',
+                         'dailyMessageCount', 'dailyRandomFindCount', 'lastRandomFindDate',
+                         'streakDays', 'todayUsageSeconds',
+                         'lastUsageDate', 'lastStreakCompletedDate', 'role',
+                         'visibility', 'allowRandomMeet', 'isOnline', 'lastActiveAtMs',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidUserProfile(incoming(), profileId);
+
+      function isOwnerProfileUpdate(profileId) {
+        let affected = incoming().diff(existing()).affectedKeys();
+        return request.auth.uid == profileId &&
+               incoming().role == existing().role &&
+               (
+                 affected.hasOnly([
+                   'firstName', 'lastName', 'birthDate', 'age', 'gender',
+                   'bio', 'interests', 'photoBase64', 'galleryPhotos',
+                   'isProfileVerified', 'verificationStatus', 'verificationVideoFrames', 'verificationSubmittedAt',
+                   'latitude', 'longitude', 'locationName', 'visibility',
+                   'allowRandomMeet', 'isOnline', 'lastActiveAtMs', 'updatedAt'
+                 ]) ||
+                 affected.hasOnly([
+                   'isPremium', 'premiumPlan', 'premiumExpiresAt',
+                   'lastPaymentAmountInr', 'lastPaymentDateMs',
+                   'lastUpiTxnId', 'paymentStatus', 'pendingPlan',
+                   'streakDays', 'todayUsageSeconds', 'lastUsageDate',
+                   'lastStreakCompletedDate', 'updatedAt'
+                 ]) ||
+                 affected.hasOnly([
+                   'dailyMessageCount', 'dailyRandomFindCount', 'lastRandomFindDate', 'updatedAt'
+                 ]) ||
+                 affected.hasOnly([
+                   'allowRandomMeet', 'isOnline', 'lastActiveAtMs', 'updatedAt'
+                 ])
+               );
+      }
+
+      function isAdminProfileUpdate() {
+        return isAdmin() &&
+               incoming().diff(existing()).affectedKeys().hasOnly([
+                 'isProfileVerified', 'verificationStatus', 'verificationVideoFrames', 'verificationSubmittedAt',
+                 'isPremium', 'premiumPlan', 'premiumExpiresAt',
+                 'lastPaymentAmountInr', 'lastPaymentDateMs',
+                 'lastUpiTxnId', 'paymentStatus', 'pendingPlan',
+                 'visibility', 'role', 'updatedAt'
+               ]);
+      }
+
+      allow update: if isSignedIn() &&
+                       isValidId(profileId) &&
+                       (request.auth.uid == profileId || isAdmin()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (isOwnerProfileUpdate(profileId) || isAdminProfileUpdate()) &&
+                       isValidUserProfile(incoming(), profileId);
+
+      allow delete: if isSignedIn() && isValidId(profileId) && (request.auth.uid == profileId || isAdmin());
+    }
+
+    // 2. Likes Collection
+    match /likes/{likeId} {
+      allow get: if isSignedIn() && isValidId(likeId) && resource != null && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(likeId) &&
+                       incoming().keys().hasAll(['fromUserId', 'toUserId', 'fromUserName', 'toUserName', 'createdAt']) &&
+                       incoming().keys().hasOnly(['fromUserId', 'toUserId', 'fromUserName', 'toUserName', 'createdAt']) &&
+                       isValidLike(incoming()) &&
+                       exists(/databases/$(database)/documents/profiles/$(incoming().fromUserId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(likeId) &&
+                       isValidLike(incoming()) &&
+                       existing().fromUserId == request.auth.uid &&
+                       incoming().fromUserId == existing().fromUserId &&
+                       incoming().toUserId == existing().toUserId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['fromUserName', 'toUserName', 'createdAt']);
+
+      allow delete: if isSignedIn() && isValidId(likeId) && existing().fromUserId == request.auth.uid;
+    }
+
+    // 3. Blocks Collection
+    match /blocks/{blockId} {
+      allow get: if isSignedIn() && isValidId(blockId) && resource != null && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(blockId) &&
+                       incoming().keys().hasAll(['userId', 'blockedUserId', 'blockedUserName', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'blockedUserId', 'blockedUserName', 'createdAt']) &&
+                       isValidBlock(incoming()) &&
+                       exists(/databases/$(database)/documents/profiles/$(incoming().userId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(blockId) &&
+                       isValidBlock(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().blockedUserId == existing().blockedUserId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['blockedUserName', 'createdAt']);
+
+      allow delete: if isSignedIn() && isValidId(blockId) && existing().userId == request.auth.uid;
+    }
+
+    // 4. Messages Collection
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && resource != null && (existing().senderId == request.auth.uid || existing().receiverId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().senderId == request.auth.uid || existing().receiverId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       incoming().keys().hasAll(['chatId', 'senderId', 'senderName', 'receiverId', 'receiverName', 'text', 'createdAt']) &&
+                       incoming().keys().hasOnly(['chatId', 'senderId', 'senderName', 'receiverId', 'receiverName', 'text', 'photoBase64', 'messageType', 'createdAt']) &&
+                       isValidMessage(incoming()) &&
+                       exists(/databases/$(database)/documents/profiles/$(incoming().senderId));
+
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(messageId) && resource != null &&
+                       (existing().senderId == request.auth.uid || existing().receiverId == request.auth.uid || isAdmin());
+    }
+
+    // 5. Call Streams Collection (Real-Time Audio & Video Relay)
+    match /call_streams/{streamUserId} {
+      allow get, list: if isSignedIn();
+
+      allow create, update: if isSignedIn() &&
+                            isValidId(streamUserId) &&
+                            request.auth.uid == streamUserId &&
+                            incoming().keys().hasAll(['userId', 'partnerId', 'callMode', 'isActive', 'seq', 'updatedAt']) &&
+                            incoming().keys().hasOnly(['userId', 'partnerId', 'callMode', 'isActive', 'seq', 'videoFrameBase64', 'audioChunkBase64', 'micLevel', 'updatedAt']) &&
+                            isValidCallStream(incoming(), streamUserId);
+
+      allow delete: if isSignedIn() && isValidId(streamUserId) && request.auth.uid == streamUserId;
+    }
+
+    // 6. Random Chat Matchmaking Queue Collection
+    match /random_chat_queue/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) &&
+                    (request.auth.uid == userId || (resource != null && existing().status == 'waiting') || isAdmin());
+      allow list: if isSignedIn() && (existing().status == 'waiting' || existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll([
+                         'userId', 'gender', 'age', 'latitude', 'longitude',
+                         'preferredGender', 'preferredMinAge', 'preferredMaxAge', 'preferredMaxDistanceKm',
+                         'status', 'matchedSessionId', 'matchedPartnerId', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'gender', 'age', 'latitude', 'longitude',
+                         'preferredGender', 'preferredMinAge', 'preferredMaxAge', 'preferredMaxDistanceKm',
+                         'status', 'matchedSessionId', 'matchedPartnerId', 'updatedAt'
+                       ]) &&
+                       incoming().status == 'waiting' &&
+                       isValidRandomChatQueue(incoming(), userId) &&
+                       exists(/databases/$(database)/documents/profiles/$(userId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       resource != null &&
+                       isValidRandomChatQueue(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       (
+                         // Owner updates own queue entry / preferences / cancellation
+                         (request.auth.uid == userId) ||
+                         // Matched peer claims a 'waiting' user atomically alongside creating the RandomChatSession
+                         (request.auth.uid != userId &&
+                          existing().status == 'waiting' &&
+                          incoming().status == 'matched' &&
+                          incoming().matchedPartnerId == request.auth.uid &&
+                          isValidId(incoming().matchedSessionId) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'status', 'matchedSessionId', 'matchedPartnerId', 'updatedAt'
+                          ]) &&
+                          existsAfter(/databases/$(database)/documents/random_chat_sessions/$(incoming().matchedSessionId)))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+    }
+
+    // 7. Random Chat Sessions Collection (Step-by-Step Mutual Consent Reveal)
+    match /random_chat_sessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId) &&
+                    ((resource != null && request.auth.uid in existing().participantIds) || isAdmin());
+      allow list: if isSignedIn() && (request.auth.uid in existing().participantIds || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(sessionId) &&
+                       incoming().keys().hasAll([
+                         'userAId', 'userBId', 'participantIds', 'userAGender', 'userBGender',
+                         'status', 'endedByUserId',
+                         'userAConsentName', 'userBConsentName',
+                         'userAConsentAge', 'userBConsentAge',
+                         'userAConsentPhoto', 'userBConsentPhoto',
+                         'userAConsentProfile', 'userBConsentProfile',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userAId', 'userBId', 'participantIds', 'userAGender', 'userBGender',
+                         'status', 'endedByUserId',
+                         'userAConsentName', 'userBConsentName',
+                         'userAConsentAge', 'userBConsentAge',
+                         'userAConsentPhoto', 'userBConsentPhoto',
+                         'userAConsentProfile', 'userBConsentProfile',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidRandomChatSession(incoming()) &&
+                       request.auth.uid in incoming().participantIds &&
+                       incoming().status == 'active' &&
+                       incoming().endedByUserId == '' &&
+                       !incoming().userAConsentName && !incoming().userBConsentName &&
+                       !incoming().userAConsentAge && !incoming().userBConsentAge &&
+                       !incoming().userAConsentPhoto && !incoming().userBConsentPhoto &&
+                       !incoming().userAConsentProfile && !incoming().userBConsentProfile;
+
+      allow update: if isSignedIn() &&
+                       isValidId(sessionId) &&
+                       resource != null &&
+                       (request.auth.uid in existing().participantIds || isAdmin()) &&
+                       isValidRandomChatSession(incoming()) &&
+                       incoming().userAId == existing().userAId &&
+                       incoming().userBId == existing().userBId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().userAGender == existing().userAGender &&
+                       incoming().userBGender == existing().userBGender &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: User A updates only their own sequential reveal consent flags while active
+                         (existing().status == 'active' &&
+                          incoming().status == 'active' &&
+                          request.auth.uid == existing().userAId &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'userAConsentName', 'userAConsentAge', 'userAConsentPhoto', 'userAConsentProfile', 'updatedAt'
+                          ]) &&
+                          (!incoming().userAConsentAge || (existing().userAConsentName && existing().userBConsentName)) &&
+                          (!incoming().userAConsentPhoto || (existing().userAConsentAge && existing().userBConsentAge)) &&
+                          (!incoming().userAConsentProfile || (existing().userAConsentPhoto && existing().userBConsentPhoto))) ||
+                         // Action 2: User B updates only their own sequential reveal consent flags while active
+                         (existing().status == 'active' &&
+                          incoming().status == 'active' &&
+                          request.auth.uid == existing().userBId &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'userBConsentName', 'userBConsentAge', 'userBConsentPhoto', 'userBConsentProfile', 'updatedAt'
+                          ]) &&
+                          (!incoming().userBConsentAge || (existing().userAConsentName && existing().userBConsentName)) &&
+                          (!incoming().userBConsentPhoto || (existing().userAConsentAge && existing().userBConsentAge)) &&
+                          (!incoming().userBConsentProfile || (existing().userAConsentPhoto && existing().userBConsentPhoto))) ||
+                         // Action 3: Either participant ends an active session (Terminal Lock)
+                         (existing().status == 'active' &&
+                          request.auth.uid in existing().participantIds &&
+                          incoming().status == 'ended' &&
+                          incoming().endedByUserId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'status', 'endedByUserId', 'updatedAt'
+                          ]))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(sessionId) &&
+                       ((resource != null && request.auth.uid in existing().participantIds) || isAdmin());
+    }
+
+    // 8. Random Chat Messages Collection (Unlimited Append-Only Anonymous Chat)
+    match /random_chat_messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) &&
+                    resource != null && (request.auth.uid in existing().participantIds || isAdmin());
+      allow list: if isSignedIn() && (request.auth.uid in existing().participantIds || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       incoming().keys().hasAll([
+                         'sessionId', 'participantIds', 'senderId', 'text', 'messageType', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'sessionId', 'participantIds', 'senderId', 'text', 'messageType', 'createdAt'
+                       ]) &&
+                       isValidRandomChatMessage(incoming()) &&
+                       request.auth.uid in incoming().participantIds &&
+                       exists(/databases/$(database)/documents/random_chat_sessions/$(incoming().sessionId)) &&
+                       request.auth.uid in get(/databases/$(database)/documents/random_chat_sessions/$(incoming().sessionId)).data.participantIds &&
+                       get(/databases/$(database)/documents/random_chat_sessions/$(incoming().sessionId)).data.participantIds == incoming().participantIds &&
+                       get(/databases/$(database)/documents/random_chat_sessions/$(incoming().sessionId)).data.status == 'active';
+
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(messageId) && resource != null &&
+                       (request.auth.uid in existing().participantIds || isAdmin());
+    }
+  }
+}

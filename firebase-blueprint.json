@@ -1,0 +1,241 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public dating profile for a registered user without PII, including 6-day streak tracking, hourly GPS location updates, UPI payment verification state, and admin role.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID." },
+        "firstName": { "type": "string", "description": "User first name (1-50 chars)." },
+        "lastName": { "type": "string", "description": "User surname (1-50 chars)." },
+        "birthDate": { "type": "string", "description": "Internal date string in YYYY-MM-DD format." },
+        "age": { "type": "integer", "description": "User age in years (18-100)." },
+        "gender": { "type": "string", "enum": ["Male", "Female", "Other"], "description": "User gender identity." },
+        "bio": { "type": "string", "description": "Short bio and interests summary." },
+        "interests": { "type": "array", "description": "List of up to 10 interest tags." },
+        "photoBase64": { "type": "string", "description": "Compressed main profile DP image as Base64." },
+        "galleryPhotos": { "type": "array", "description": "Up to 6 additional profile gallery photos as compressed Base64 strings." },
+        "isProfileVerified": { "type": "boolean", "description": "Whether the user's profile and live face video have been verified by Admin (Blue Tick)." },
+        "verificationStatus": { "type": "string", "enum": ["None", "Pending", "Verified", "Rejected"], "description": "Status of live face video profile verification." },
+        "verificationVideoFrames": { "type": "array", "description": "Recorded left-to-right live face video frames in Base64 for Admin verification." },
+        "verificationSubmittedAt": { "type": "integer", "description": "Epoch millis when the user submitted their live face verification video." },
+        "latitude": { "type": "number", "description": "GPS latitude coordinate." },
+        "longitude": { "type": "number", "description": "GPS longitude coordinate." },
+        "locationName": { "type": "string", "description": "Human-readable city or area label." },
+        "isPremium": { "type": "boolean", "description": "Whether user has an active Milan Premium subscription." },
+        "premiumPlan": { "type": "string", "enum": ["Free", "Monthly", "Yearly", "FreeReward1Day"], "description": "Current plan identifier." },
+        "premiumExpiresAt": { "type": "integer", "description": "Epoch millis when premium expires (0 for none)." },
+        "lastPaymentAmountInr": { "type": "integer", "description": "Amount paid in INR for the most recent UPI subscription." },
+        "lastPaymentDateMs": { "type": "integer", "description": "Epoch millis of the most recent UPI subscription payment." },
+        "lastUpiTxnId": { "type": "string", "description": "12-digit UPI UTR / Transaction Reference ID for payment verification." },
+        "paymentStatus": { "type": "string", "enum": ["None", "PendingVerification", "Verified", "Rejected"], "description": "Verification status of the latest UPI payment." },
+        "pendingPlan": { "type": "string", "description": "Plan requested in a pending UPI verification (Monthly or Yearly)." },
+        "dailyMessageCount": { "type": "integer", "description": "Number of messages sent today." },
+        "dailyRandomFindCount": { "type": "integer", "description": "Number of Random Chat partners matched today (for Free daily 2-find limit)." },
+        "lastRandomFindDate": { "type": "string", "description": "Date string YYYY-MM-DD when dailyRandomFindCount was last updated." },
+        "streakDays": { "type": "integer", "description": "Consecutive days with >=15 minutes app usage (0-6)." },
+        "todayUsageSeconds": { "type": "integer", "description": "Active app usage seconds on lastUsageDate." },
+        "lastUsageDate": { "type": "string", "description": "Date string YYYY-MM-DD of last tracked usage." },
+        "lastStreakCompletedDate": { "type": "string", "description": "Date string YYYY-MM-DD when 15-min goal was last completed." },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "User role (admin reserved for rk3171998@gmail.com)." },
+        "visibility": { "type": "string", "enum": ["public", "hidden"], "description": "Profile discovery visibility." },
+        "allowRandomMeet": { "type": "boolean", "description": "Whether user accepts incoming Random Chat matches even when browsing or offline." },
+        "isOnline": { "type": "boolean", "description": "Real-time foreground online presence status." },
+        "lastActiveAtMs": { "type": "integer", "description": "Epoch millis of last foreground heartbeat or offline transition." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "userId",
+        "firstName",
+        "lastName",
+        "birthDate",
+        "age",
+        "gender",
+        "bio",
+        "interests",
+        "photoBase64",
+        "latitude",
+        "longitude",
+        "locationName",
+        "isPremium",
+        "premiumPlan",
+        "premiumExpiresAt",
+        "dailyMessageCount",
+        "streakDays",
+        "todayUsageSeconds",
+        "lastUsageDate",
+        "lastStreakCompletedDate",
+        "role",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Like": {
+      "title": "Like",
+      "description": "One-way like sent from one user to another, unlocking messaging for non-premium users.",
+      "type": "object",
+      "properties": {
+        "fromUserId": { "type": "string", "description": "UID of user sending the like." },
+        "toUserId": { "type": "string", "description": "UID of user receiving the like." },
+        "fromUserName": { "type": "string", "description": "Display name of sender." },
+        "toUserName": { "type": "string", "description": "Display name of recipient." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["fromUserId", "toUserId", "fromUserName", "toUserName", "createdAt"]
+    },
+    "Block": {
+      "title": "Block",
+      "description": "Record of a user blocking another user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user who initiated the block." },
+        "blockedUserId": { "type": "string", "description": "UID of the blocked user." },
+        "blockedUserName": { "type": "string", "description": "Display name of the blocked user." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["userId", "blockedUserId", "blockedUserName", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Direct chat message, shared photo, or audio/video call log between two users.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string", "description": "Deterministic conversation ID (minUid_maxUid)." },
+        "senderId": { "type": "string", "description": "UID of message sender." },
+        "senderName": { "type": "string", "description": "Name of message sender." },
+        "receiverId": { "type": "string", "description": "UID of message recipient." },
+        "receiverName": { "type": "string", "description": "Name of message recipient." },
+        "text": { "type": "string", "description": "Message body or caption (1-1000 chars)." },
+        "photoBase64": { "type": "string", "description": "Optional compressed Base64 photo shared in chat." },
+        "messageType": { "type": "string", "enum": ["text", "photo", "audio_call", "video_call"], "description": "Type of chat message or call event." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["chatId", "senderId", "senderName", "receiverId", "receiverName", "text", "createdAt"]
+    },
+    "CallStream": {
+      "title": "CallStream",
+      "description": "Real-time audio PCM and compressed JPEG video frame relay stream for active calls.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user broadcasting their media packet." },
+        "partnerId": { "type": "string", "description": "UID of the call partner receiving the media packet." },
+        "callMode": { "type": "string", "enum": ["AUDIO", "VIDEO"], "description": "Active call mode." },
+        "isActive": { "type": "boolean", "description": "Whether the stream is currently active." },
+        "seq": { "type": "integer", "description": "Monotonically increasing packet sequence number." },
+        "videoFrameBase64": { "type": "string", "description": "Optional compressed JPEG camera frame in Base64." },
+        "audioChunkBase64": { "type": "string", "description": "Optional 8kHz 16-bit mono PCM audio chunk in Base64." },
+        "micLevel": { "type": "integer", "description": "Optional microphone voice level (0-100)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["userId", "partnerId", "callMode", "isActive", "seq", "updatedAt"]
+    },
+    "RandomChatQueue": {
+      "title": "RandomChatQueue",
+      "description": "Live matchmaking queue entry for Random Chat filtered by gender, age range, and distance.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated user UID (matches document ID)." },
+        "gender": { "type": "string", "enum": ["Male", "Female", "Other"], "description": "Caller gender identity." },
+        "age": { "type": "integer", "description": "Caller age in years (18-100)." },
+        "latitude": { "type": "number", "description": "Caller GPS latitude." },
+        "longitude": { "type": "number", "description": "Caller GPS longitude." },
+        "preferredGender": { "type": "string", "enum": ["All", "Male", "Female"], "description": "Target gender preference." },
+        "preferredMinAge": { "type": "integer", "description": "Minimum preferred partner age (18-65)." },
+        "preferredMaxAge": { "type": "integer", "description": "Maximum preferred partner age (18-65)." },
+        "preferredMaxDistanceKm": { "type": "integer", "description": "Maximum preferred partner distance in km (up to 25000 for global unlimited)." },
+        "status": { "type": "string", "enum": ["waiting", "matched"], "description": "Matchmaking queue state." },
+        "matchedSessionId": { "type": "string", "description": "Created RandomChatSession ID once matched (empty while waiting)." },
+        "matchedPartnerId": { "type": "string", "description": "Matched partner UID once matched (empty while waiting)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "userId", "gender", "age", "latitude", "longitude",
+        "preferredGender", "preferredMinAge", "preferredMaxAge", "preferredMaxDistanceKm",
+        "status", "matchedSessionId", "matchedPartnerId", "updatedAt"
+      ]
+    },
+    "RandomChatSession": {
+      "title": "RandomChatSession",
+      "description": "Shared anonymous Random Chat session with step-by-step mutual consent reveal flags.",
+      "type": "object",
+      "properties": {
+        "userAId": { "type": "string", "description": "UID of first matched participant." },
+        "userBId": { "type": "string", "description": "UID of second matched participant." },
+        "participantIds": { "type": "array", "description": "Two-element list [userAId, userBId]." },
+        "userAGender": { "type": "string", "enum": ["Male", "Female", "Other"], "description": "Gender of User A shown initially." },
+        "userBGender": { "type": "string", "enum": ["Male", "Female", "Other"], "description": "Gender of User B shown initially." },
+        "status": { "type": "string", "enum": ["active", "ended"], "description": "Session lifecycle status." },
+        "endedByUserId": { "type": "string", "description": "UID of participant who ended the session (empty while active)." },
+        "userAConsentName": { "type": "boolean", "description": "User A consent for Step 1 Name reveal." },
+        "userBConsentName": { "type": "boolean", "description": "User B consent for Step 1 Name reveal." },
+        "userAConsentAge": { "type": "boolean", "description": "User A consent for Step 2 Age reveal." },
+        "userBConsentAge": { "type": "boolean", "description": "User B consent for Step 2 Age reveal." },
+        "userAConsentPhoto": { "type": "boolean", "description": "User A consent for Step 3 Face/Photo reveal." },
+        "userBConsentPhoto": { "type": "boolean", "description": "User B consent for Step 3 Face/Photo reveal." },
+        "userAConsentProfile": { "type": "boolean", "description": "User A consent for Step 4 Full Profile reveal." },
+        "userBConsentProfile": { "type": "boolean", "description": "User B consent for Step 4 Full Profile reveal." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "userAId", "userBId", "participantIds", "userAGender", "userBGender",
+        "status", "endedByUserId",
+        "userAConsentName", "userBConsentName",
+        "userAConsentAge", "userBConsentAge",
+        "userAConsentPhoto", "userBConsentPhoto",
+        "userAConsentProfile", "userBConsentProfile",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "RandomChatMessage": {
+      "title": "RandomChatMessage",
+      "description": "Unlimited real-time anonymous Random Chat messages scoped to a RandomChatSession.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "description": "Parent RandomChatSession ID." },
+        "participantIds": { "type": "array", "description": "Two-element participant UID list copied from session." },
+        "senderId": { "type": "string", "description": "UID of authenticated sender." },
+        "text": { "type": "string", "description": "Message text (1-1000 chars)." },
+        "messageType": { "type": "string", "enum": ["text", "system"], "description": "Message category." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["sessionId", "participantIds", "senderId", "text", "messageType", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public dating profiles indexed by user UID."
+    },
+    "/likes/{likeId}": {
+      "schema": { "$ref": "#/entities/Like" },
+      "description": "Likes sent between users."
+    },
+    "/blocks/{blockId}": {
+      "schema": { "$ref": "#/entities/Block" },
+      "description": "Per-user block list records."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Real-time chat messages, photo attachments, and call logs between users."
+    },
+    "/call_streams/{streamUserId}": {
+      "schema": { "$ref": "#/entities/CallStream" },
+      "description": "Live two-way audio and video frame packets during an active call."
+    },
+    "/random_chat_queue/{userId}": {
+      "schema": { "$ref": "#/entities/RandomChatQueue" },
+      "description": "Active Random Chat matchmaking queue entries keyed by user UID."
+    },
+    "/random_chat_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/RandomChatSession" },
+      "description": "Matched anonymous Random Chat sessions with step-by-step mutual reveal state."
+    },
+    "/random_chat_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/RandomChatMessage" },
+      "description": "Unlimited real-time messages inside Random Chat sessions."
+    }
+  }
+}

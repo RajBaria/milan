@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Milan</string>
+    <string name="tagline">Find real connections near you</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="welcome_title">Welcome to Milan</string>
+    <string name="welcome_subtitle">Location-based dating and connection app — browse nearby profiles in List View and start chatting.</string>
+    <string name="tab_discover">Discover</string>
+    <string name="tab_likes">Likes</string>
+    <string name="tab_random">Random</string>
+    <string name="tab_chats">Chats</string>
+    <string name="tab_premium">Premium</string>
+    <string name="tab_profile">Profile</string>
+</resources>

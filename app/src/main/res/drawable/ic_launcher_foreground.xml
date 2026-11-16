@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer soft halo -->
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M54,24 C37.4,24 24,37.4 24,54 C24,70.6 37.4,84 54,84 C70.6,84 84,70.6 84,54 C84,37.4 70.6,24 54,24 Z" />
+    <!-- Bold Heart + Location Pin Silhouette -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,76 C54,76 32,61.2 32,45.5 C32,38.2 37.8,32.5 44.8,32.5 C48.9,32.5 52.5,34.5 54,37.6 C55.5,34.5 59.1,32.5 63.2,32.5 C70.2,32.5 76,38.2 76,45.5 C76,61.2 54,76 54,76 Z" />
+    <!-- Location Pin Cutout Dot -->
+    <path
+        android:fillColor="#FFE86F88"
+        android:pathData="M54,44 C50.7,44 48,46.7 48,50 C48,53.3 50.7,56 54,56 C57.3,56 60,53.3 60,50 C60,46.7 57.3,44 54,44 Z" />
+</vector>

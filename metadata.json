@@ -1,0 +1,6 @@
+{
+  "name": "Milan",
+  "description": "Location-based dating and connection app with profile list discovery, filters, likes, real-time chat, and premium membership.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
