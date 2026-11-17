@@ -88,6 +88,7 @@ import com.example.ui.screens.ChatsAndConversationScreen
 import com.example.ui.screens.DiscoverListScreen
 import com.example.ui.screens.LikesScreen
 import com.example.ui.screens.MyProfileAndBlockedScreen
+import com.example.ui.screens.PreLoginLocationSnapshot
 import com.example.ui.screens.PremiumSubscriptionScreen
 import com.example.ui.screens.ProfileSetupWizardScreen
 import com.example.ui.screens.RandomChatScreen
@@ -158,14 +159,19 @@ fun AppNavigation(
 ) {
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
     val user = currentUser
+    var preLoginLocation by remember { mutableStateOf<PreLoginLocationSnapshot?>(null) }
 
     if (user == null) {
-        AuthScreen(onAuthSuccess = {})
+        AuthScreen(
+            onAuthSuccess = {},
+            onLocationCaptured = { snapshot -> preLoginLocation = snapshot }
+        )
     } else {
         AuthenticatedMilanApp(
             currentUserId = user.uid,
             currentUserEmail = user.email,
             currentUserDisplayName = user.displayName,
+            preLoginLocation = preLoginLocation,
             isDarkMode = isDarkMode,
             colorTheme = colorTheme,
             onToggleDarkMode = onToggleDarkMode,
@@ -179,6 +185,7 @@ fun AuthenticatedMilanApp(
     currentUserId: String,
     currentUserEmail: String? = null,
     currentUserDisplayName: String? = null,
+    preLoginLocation: PreLoginLocationSnapshot? = null,
     isDarkMode: Boolean = false,
     colorTheme: AppColorTheme = AppColorTheme.PINK,
     onToggleDarkMode: () -> Unit = {},
@@ -362,6 +369,7 @@ fun AuthenticatedMilanApp(
                 currentUserEmail = currentUserEmail,
                 currentUserDisplayName = currentUserDisplayName,
                 initialProfile = null,
+                preLoginLocation = preLoginLocation,
                 onSaveProfile = { profile ->
                     viewModel.saveUserProfile(profile)
                 }
@@ -376,6 +384,7 @@ fun AuthenticatedMilanApp(
                     currentUserEmail = currentUserEmail,
                     currentUserDisplayName = currentUserDisplayName,
                     initialProfile = myProfile,
+                    preLoginLocation = preLoginLocation,
                     onSaveProfile = { updatedProfile ->
                         viewModel.saveUserProfile(updatedProfile) {
                             isEditingProfile = false
@@ -388,6 +397,18 @@ fun AuthenticatedMilanApp(
                     }
                 )
             } else {
+                // Sync pre-login captured location right after login
+                LaunchedEffect(myProfile.userId, preLoginLocation) {
+                    if (preLoginLocation != null) {
+                        viewModel.updateMyLocation(
+                            preLoginLocation.latitude,
+                            preLoginLocation.longitude,
+                            preLoginLocation.locationName,
+                            showBanner = false
+                        )
+                    }
+                }
+
                 // Automatic Hourly GPS Location Sync Loop
                 LaunchedEffect(myProfile.userId) {
                     while (isActive) {

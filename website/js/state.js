@@ -17,6 +17,33 @@ import {
 const savedTheme = localStorage.getItem("milan_color_theme") || "pink";
 const savedMode = localStorage.getItem("milan_dark_mode") === "true" ? "dark" : "light";
 
+function loadSavedPreLoginLocation() {
+  try {
+    const raw = sessionStorage.getItem("milan_pre_login_location");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.latitude === "number" && typeof parsed.longitude === "number") {
+        return {
+          status: "granted",
+          granted: true,
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+          locationName: String(parsed.locationName || "GPS Active"),
+          error: ""
+        };
+      }
+    }
+  } catch {}
+  return {
+    status: "idle", // idle | checking | granted | denied | error | unsupported
+    granted: false,
+    latitude: null,
+    longitude: null,
+    locationName: "",
+    error: ""
+  };
+}
+
 export const store = {
   authReady: false,
   user: null, // Firebase User
@@ -67,8 +94,26 @@ export const store = {
   toasts: [],
   sessionUsageSeconds: 0,
   locationSyncStatus: "Browser Location • Click Sync to update",
+  preLoginLocation: loadSavedPreLoginLocation(),
   editProfileOpen: false
 };
+
+export function setPreLoginLocation(nextState) {
+  store.preLoginLocation = { ...store.preLoginLocation, ...nextState };
+  try {
+    if (store.preLoginLocation.granted && store.preLoginLocation.latitude != null) {
+      sessionStorage.setItem(
+        "milan_pre_login_location",
+        JSON.stringify({
+          latitude: store.preLoginLocation.latitude,
+          longitude: store.preLoginLocation.longitude,
+          locationName: store.preLoginLocation.locationName
+        })
+      );
+    }
+  } catch {}
+  notify();
+}
 
 const listeners = new Set();
 

@@ -9,6 +9,10 @@ import {
 } from "../utils.js";
 
 export function renderAuthLanding(container, actions) {
+  const loc = store.preLoginLocation || { status: "idle", granted: false };
+  const isChecking = loc.status === "checking";
+  const isReady = Boolean(loc.granted && loc.latitude != null);
+
   container.innerHTML = `
     <div class="auth-page">
       <div class="auth-card-shell">
@@ -34,6 +38,48 @@ export function renderAuthLanding(container, actions) {
             </p>
           </div>
 
+          <div id="pre-login-location-card" class="card-soft" style="background:${
+            isReady
+              ? "color-mix(in srgb, var(--primary-container) 55%, var(--surface))"
+              : "color-mix(in srgb, var(--secondary-container) 60%, var(--surface))"
+          };">
+            <div class="row-between" style="gap:12px;">
+              <div style="min-width:0;flex:1;">
+                <strong style="display:block;color:${isReady ? "var(--primary)" : "var(--on-surface)"};">
+                  ${
+                    isChecking
+                      ? "⏳ Enabling Location &amp; GPS..."
+                      : isReady
+                        ? `✓ Location Active • ${escapeHtml(loc.locationName || "GPS Ready")}`
+                        : "📍 Location Required Before Login"
+                  }
+                </strong>
+                <span class="muted" style="font-size:12px;display:block;margin-top:2px;">
+                  ${
+                    isChecking
+                      ? "Please tap 'Allow' in the browser location prompt."
+                      : isReady
+                        ? `GPS coordinates ready (${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)})`
+                        : "Allow browser location & turn on GPS before signing in."
+                  }
+                </span>
+              </div>
+              <button
+                type="button"
+                id="enable-location-btn"
+                class="btn btn-sm ${isReady ? "btn-outline" : "btn-tonal"}"
+                ${isChecking ? "disabled" : ""}
+              >
+                ${isChecking ? "Checking..." : isReady ? "Refresh" : "Enable Location"}
+              </button>
+            </div>
+            ${
+              loc.error && !isReady
+                ? `<p style="margin-top:8px;font-size:12px;color:var(--error);">${escapeHtml(loc.error)}</p>`
+                : ""
+            }
+          </div>
+
           <button id="google-signin-btn" class="google-btn">
             <span class="google-g-badge">
               <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -43,7 +89,7 @@ export function renderAuthLanding(container, actions) {
                 <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"/>
               </svg>
             </span>
-            <span>Continue with Google</span>
+            <span>${isReady ? "Continue with Google" : "Allow Location &amp; Continue with Google"}</span>
           </button>
 
           <div id="auth-error-box" class="card-soft hidden" style="background:var(--error-container);color:var(--on-error-container);"></div>
@@ -57,12 +103,27 @@ export function renderAuthLanding(container, actions) {
   `;
 
   const btn = container.querySelector("#google-signin-btn");
+  const enableLocBtn = container.querySelector("#enable-location-btn");
   const errBox = container.querySelector("#auth-error-box");
+
+  enableLocBtn?.addEventListener("click", async () => {
+    errBox.classList.add("hidden");
+    await actions.requestPreLoginLocation();
+  });
 
   btn?.addEventListener("click", async () => {
     btn.disabled = true;
     errBox.classList.add("hidden");
     try {
+      if (!store.preLoginLocation?.granted) {
+        const locRes = await actions.requestPreLoginLocation();
+        if (!locRes?.granted) {
+          btn.disabled = false;
+          errBox.textContent = locRes?.error || "Location permission is required before logging in.";
+          errBox.classList.remove("hidden");
+          return;
+        }
+      }
       await actions.signIn();
     } catch (err) {
       btn.disabled = false;
@@ -80,15 +141,16 @@ export function renderOnboardingOrEdit(container, actions, existingProfile = nul
   const lockedAge = existingProfile?.age || identity.age;
   const lockedBirthDate = existingProfile?.birthDate || identity.birthDate;
   const lockedGender = existingProfile?.gender || identity.gender;
+  const preLoc = store.preLoginLocation;
 
   let draft = {
     bio: existingProfile?.bio || "Looking for genuine friendships and meaningful connections ✨",
     interests: [...(existingProfile?.interests?.length ? existingProfile.interests : ["Music", "Travel", "Coffee"])],
     photoBase64: existingProfile?.photoBase64 || "avatar_rose",
     galleryPhotos: [...(existingProfile?.galleryPhotos || [])],
-    latitude: existingProfile?.latitude ?? 23.0225,
-    longitude: existingProfile?.longitude ?? 72.5714,
-    locationName: existingProfile?.locationName || "Ahmedabad, Gujarat",
+    latitude: existingProfile?.latitude ?? (preLoc?.granted && preLoc.latitude != null ? preLoc.latitude : 23.0225),
+    longitude: existingProfile?.longitude ?? (preLoc?.granted && preLoc.longitude != null ? preLoc.longitude : 72.5714),
+    locationName: existingProfile?.locationName || (preLoc?.granted && preLoc.locationName ? preLoc.locationName : "Ahmedabad, Gujarat"),
     visibility: existingProfile?.visibility || "public",
     allowRandomMeet: existingProfile?.allowRandomMeet !== false
   };

@@ -4,14 +4,20 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
+import android.location.LocationManager
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.core.location.LocationManagerCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,6 +69,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,6 +94,9 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.R
 import com.example.data.model.ADMIN_EMAIL
 import com.example.data.model.UserProfile
@@ -97,7 +107,10 @@ import com.example.ui.components.ProfileAvatarView
 import com.example.ui.components.SixPhotosGalleryEditorGrid
 import com.example.ui.components.VerifiedBlueTickBadge
 import com.example.ui.components.encodeUriToBase64Thumbnail
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationSettingsRequest
 import com.google.android.gms.location.Priority
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -215,22 +228,241 @@ fun performGoogleSignOut(
     }
 }
 
+data class PreLoginLocationSnapshot(
+    val latitude: Double,
+    val longitude: Double,
+    val locationName: String
+)
+
+internal fun hasLocationPermission(context: Context): Boolean {
+    val fine = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+    val coarse = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+    return fine || coarse
+}
+
+internal fun isDeviceLocationEnabled(context: Context): Boolean {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+    return LocationManagerCompat.isLocationEnabled(lm)
+}
+
+internal fun ensureDeviceLocationEnabled(
+    context: Context,
+    onEnabled: () -> Unit,
+    onResolutionRequired: (IntentSenderRequest) -> Unit,
+    onNeedsManualSettings: (String) -> Unit
+) {
+    if (isDeviceLocationEnabled(context)) {
+        onEnabled()
+        return
+    }
+    try {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 10_000L)
+            .build()
+        val settingsRequest = LocationSettingsRequest.Builder()
+            .addLocationRequest(locationRequest)
+            .setAlwaysShow(true)
+            .build()
+        LocationServices.getSettingsClient(context)
+            .checkLocationSettings(settingsRequest)
+            .addOnSuccessListener {
+                onEnabled()
+            }
+            .addOnFailureListener { exception ->
+                if (exception is ResolvableApiException) {
+                    try {
+                        onResolutionRequired(IntentSenderRequest.Builder(exception.resolution).build())
+                    } catch (_: Exception) {
+                        onNeedsManualSettings("Please turn on Location / GPS in device settings before logging in.")
+                    }
+                } else if (isDeviceLocationEnabled(context)) {
+                    onEnabled()
+                } else {
+                    onNeedsManualSettings("Please turn on Location / GPS in device settings before logging in.")
+                }
+            }
+    } catch (_: Exception) {
+        if (isDeviceLocationEnabled(context)) {
+            onEnabled()
+        } else {
+            onNeedsManualSettings("Please turn on Location / GPS in device settings before logging in.")
+        }
+    }
+}
+
 @Composable
-fun AuthScreen(onAuthSuccess: () -> Unit) {
+fun AuthScreen(
+    onAuthSuccess: () -> Unit,
+    onLocationCaptured: (PreLoginLocationSnapshot) -> Unit = {}
+) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        attemptAutoSignIn(
+    var hasPermission by remember { mutableStateOf(hasLocationPermission(context)) }
+    var isGpsOn by remember { mutableStateOf(isDeviceLocationEnabled(context)) }
+    var isCheckingLocation by remember { mutableStateOf(false) }
+    var detectedLocationLabel by remember { mutableStateOf<String?>(null) }
+    var needsManualSettings by remember { mutableStateOf(false) }
+    var pendingActionAfterLocation by remember { mutableStateOf<String?>(null) }
+    var autoSignInStarted by remember { mutableStateOf(false) }
+
+    fun launchGoogleSignInNow() {
+        errorMessage = null
+        isLoading = true
+        onGoogleSignInClicked(
             context = context,
             credentialManager = credentialManager,
-            onAuthSuccess = onAuthSuccess,
-            onUnauthenticated = {},
-            scope = scope
+            onAuthSuccess = {
+                isLoading = false
+                onAuthSuccess()
+            },
+            onAuthError = { msg ->
+                isLoading = false
+                errorMessage = msg
+            },
+            scope = scope,
+            onAuthCancelled = {
+                isLoading = false
+            }
         )
+    }
+
+    fun onLocationReadyAndProceed() {
+        hasPermission = true
+        isGpsOn = true
+        isCheckingLocation = false
+        needsManualSettings = false
+        errorMessage = null
+        fetchDeviceLocation(context) { lat, lon, cityLabel ->
+            detectedLocationLabel = cityLabel
+            onLocationCaptured(PreLoginLocationSnapshot(lat, lon, cityLabel))
+        }
+        val pending = pendingActionAfterLocation
+        pendingActionAfterLocation = null
+        if (pending == "MANUAL_SIGN_IN") {
+            launchGoogleSignInNow()
+        } else if (pending == "AUTO_SIGN_IN" && !autoSignInStarted) {
+            autoSignInStarted = true
+            attemptAutoSignIn(
+                context = context,
+                credentialManager = credentialManager,
+                onAuthSuccess = onAuthSuccess,
+                onUnauthenticated = {},
+                scope = scope
+            )
+        }
+    }
+
+    val locationSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK || isDeviceLocationEnabled(context)) {
+            onLocationReadyAndProceed()
+        } else {
+            isCheckingLocation = false
+            isGpsOn = false
+            isLoading = false
+            pendingActionAfterLocation = null
+            needsManualSettings = true
+            errorMessage = "Please turn on device Location / GPS before logging in."
+        }
+    }
+
+    fun checkAndEnableGps() {
+        isCheckingLocation = true
+        needsManualSettings = false
+        ensureDeviceLocationEnabled(
+            context = context,
+            onEnabled = {
+                onLocationReadyAndProceed()
+            },
+            onResolutionRequired = { intentSenderRequest ->
+                locationSettingsLauncher.launch(intentSenderRequest)
+            },
+            onNeedsManualSettings = { msg ->
+                isCheckingLocation = false
+                isGpsOn = false
+                isLoading = false
+                needsManualSettings = true
+                pendingActionAfterLocation = null
+                errorMessage = msg
+            }
+        )
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        hasPermission = granted
+        if (granted) {
+            checkAndEnableGps()
+        } else {
+            isCheckingLocation = false
+            isLoading = false
+            pendingActionAfterLocation = null
+            errorMessage = "Location permission is required before logging in. Tap 'Enable Location' to allow access."
+        }
+    }
+
+    fun ensureLocationBeforeLogin(pendingAction: String?) {
+        pendingActionAfterLocation = pendingAction
+        errorMessage = null
+        val permOk = hasLocationPermission(context)
+        hasPermission = permOk
+        if (!permOk) {
+            isCheckingLocation = true
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                )
+            )
+            return
+        }
+        val gpsOk = isDeviceLocationEnabled(context)
+        isGpsOn = gpsOk
+        if (!gpsOk) {
+            checkAndEnableGps()
+            return
+        }
+        onLocationReadyAndProceed()
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val permNow = hasLocationPermission(context)
+                val gpsNow = isDeviceLocationEnabled(context)
+                hasPermission = permNow
+                isGpsOn = gpsNow
+                if (permNow && gpsNow) {
+                    needsManualSettings = false
+                    if (detectedLocationLabel == null) {
+                        fetchDeviceLocation(context) { lat, lon, cityLabel ->
+                            detectedLocationLabel = cityLabel
+                            onLocationCaptured(PreLoginLocationSnapshot(lat, lon, cityLabel))
+                        }
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(Unit) {
+        ensureLocationBeforeLogin("AUTO_SIGN_IN")
     }
 
     Surface(
@@ -294,6 +526,83 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                     }
                 }
 
+                val isLocationReady = hasPermission && isGpsOn
+                Surface(
+                    color = if (isLocationReady) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("pre_login_location_card")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (isCheckingLocation) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isLocationReady) Icons.Default.CheckCircle else Icons.Default.MyLocation,
+                                contentDescription = "Location status",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = when {
+                                    isCheckingLocation -> "Enabling GPS Location..."
+                                    isLocationReady -> "Location Active • ${detectedLocationLabel ?: "GPS Ready"}"
+                                    !hasPermission -> "Location Permission Required"
+                                    else -> "Device GPS / Location is OFF"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isLocationReady) {
+                                    "Permission granted & GPS turned on before login"
+                                } else {
+                                    "Turn on location permission & GPS before logging in"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (!isLocationReady && !isCheckingLocation) {
+                            TextButton(
+                                onClick = {
+                                    if (needsManualSettings && hasPermission && !isGpsOn) {
+                                        try {
+                                            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                                        } catch (_: Exception) {
+                                            ensureLocationBeforeLogin(null)
+                                        }
+                                    } else if (!hasPermission) {
+                                        ensureLocationBeforeLogin(null)
+                                    } else {
+                                        ensureLocationBeforeLogin(null)
+                                    }
+                                },
+                                modifier = Modifier.testTag("enable_location_before_login_button")
+                            ) {
+                                Text(if (needsManualSettings && hasPermission && !isGpsOn) "Settings" else "Enable")
+                            }
+                        }
+                    }
+                }
+
                 if (errorMessage != null) {
                     Card(
                         colors = CardDefaults.cardColors(
@@ -301,35 +610,44 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text(
-                            text = errorMessage!!,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(14.dp)
-                        )
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = errorMessage!!,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (!hasPermission) {
+                                TextButton(
+                                    onClick = {
+                                        try {
+                                            context.startActivity(
+                                                Intent(
+                                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                    Uri.fromParts("package", context.packageName, null)
+                                                )
+                                            )
+                                        } catch (_: Exception) {}
+                                    }
+                                ) {
+                                    Text("Open App Location Permissions")
+                                }
+                            }
+                        }
                     }
                 }
 
                 Button(
                     onClick = {
                         errorMessage = null
-                        isLoading = true
-                        onGoogleSignInClicked(
-                            context = context,
-                            credentialManager = credentialManager,
-                            onAuthSuccess = {
-                                isLoading = false
-                                onAuthSuccess()
-                            },
-                            onAuthError = { msg ->
-                                isLoading = false
-                                errorMessage = msg
-                            },
-                            scope = scope,
-                            onAuthCancelled = {
-                                isLoading = false
-                            }
-                        )
+                        if (hasLocationPermission(context) && isDeviceLocationEnabled(context)) {
+                            launchGoogleSignInNow()
+                        } else {
+                            isLoading = true
+                            ensureLocationBeforeLogin("MANUAL_SIGN_IN")
+                        }
                     },
                     enabled = !isLoading,
                     modifier = Modifier
@@ -354,7 +672,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Sign in with Google",
+                            text = if (isLocationReady) "Sign in with Google" else "Allow Location & Sign in with Google",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
@@ -391,6 +709,7 @@ fun ProfileSetupWizardScreen(
     currentUserEmail: String? = null,
     currentUserDisplayName: String? = null,
     initialProfile: UserProfile?,
+    preLoginLocation: PreLoginLocationSnapshot? = null,
     onSaveProfile: (UserProfile) -> Unit,
     onCancelEdit: (() -> Unit)? = null
 ) {
@@ -432,12 +751,23 @@ fun ProfileSetupWizardScreen(
     var verificationSubmittedAt by remember { mutableStateOf(initialProfile?.verificationSubmittedAt ?: 0L) }
     var showFaceRecorderDialog by remember { mutableStateOf(false) }
 
-    var latitude by remember { mutableStateOf(initialProfile?.latitude ?: 23.0225) }
-    var longitude by remember { mutableStateOf(initialProfile?.longitude ?: 72.5714) }
-    var locationName by remember { mutableStateOf(initialProfile?.locationName ?: "Ahmedabad, Gujarat") }
-    var locationGranted by remember { mutableStateOf(initialProfile != null) }
+    var latitude by remember { mutableStateOf(initialProfile?.latitude ?: preLoginLocation?.latitude ?: 23.0225) }
+    var longitude by remember { mutableStateOf(initialProfile?.longitude ?: preLoginLocation?.longitude ?: 72.5714) }
+    var locationName by remember { mutableStateOf(initialProfile?.locationName ?: preLoginLocation?.locationName ?: "Ahmedabad, Gujarat") }
+    var locationGranted by remember { mutableStateOf(initialProfile != null || preLoginLocation != null || (hasLocationPermission(context) && isDeviceLocationEnabled(context))) }
     var isFetchingLocation by remember { mutableStateOf(false) }
     var validationError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialProfile, preLoginLocation) {
+        if (initialProfile == null && preLoginLocation == null && hasLocationPermission(context) && isDeviceLocationEnabled(context)) {
+            fetchDeviceLocation(context) { lat, lon, cityLabel ->
+                latitude = lat
+                longitude = lon
+                locationName = cityLabel
+                locationGranted = true
+            }
+        }
+    }
 
     BackHandler(enabled = currentStep > 1 || onCancelEdit != null) {
         if (currentStep > 1) {

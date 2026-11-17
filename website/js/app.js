@@ -19,6 +19,7 @@ import {
   pushToast,
   recordNotification,
   resetStoreForAuth,
+  setPreLoginLocation,
   store,
   subscribe
 } from "./state.js";
@@ -57,6 +58,9 @@ let knownMsgIds = new Set();
 let initialRandomSessionsLoaded = false;
 let knownRandomSessionIds = new Set();
 const appBootTimeMs = Date.now();
+let preLoginLocationSyncedForUid = null;
+let autoPreLoginLocAttempted = false;
+let activePreLoginLocPromise = null;
 
 function clearDataSubscriptions() {
   dataUnsubs.forEach((u) => u?.());
@@ -94,6 +98,26 @@ function startUserSubscriptions(user) {
         // Auto-expire finished premium plan
         if (profile.isPremium && profile.premiumExpiresAt > 0 && Date.now() >= profile.premiumExpiresAt) {
           api.downgradeToFreePlan().catch(() => {});
+        }
+        // Sync pre-login captured browser GPS once per login session
+        if (
+          preLoginLocationSyncedForUid !== uid &&
+          store.preLoginLocation?.granted &&
+          store.preLoginLocation.latitude != null &&
+          store.preLoginLocation.longitude != null
+        ) {
+          preLoginLocationSyncedForUid = uid;
+          const locLabel = store.preLoginLocation.locationName || profile.locationName || "Nearby";
+          api
+            .updateUserLocation(
+              store.preLoginLocation.latitude,
+              store.preLoginLocation.longitude,
+              locLabel
+            )
+            .then(() => {
+              store.locationSyncStatus = `Synced at ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+            })
+            .catch(() => {});
         }
       }
       notify();
@@ -284,6 +308,87 @@ function startUserSubscriptions(user) {
 // ==================== ACTIONS ====================
 
 const actions = {
+  requestPreLoginLocation(options = {}) {
+    if (activePreLoginLocPromise) return activePreLoginLocPromise;
+    if (!navigator.geolocation) {
+      const msg = "Your browser does not support GPS/location access.";
+      setPreLoginLocation({ granted: false, status: "unsupported", error: msg });
+      return Promise.resolve({ granted: false, error: msg });
+    }
+
+    setPreLoginLocation({ status: "checking", error: "" });
+
+    activePreLoginLocPromise = new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const latitude = pos.coords.latitude;
+          const longitude = pos.coords.longitude;
+          let locationName = store.preLoginLocation?.locationName || "GPS Active";
+          setPreLoginLocation({
+            granted: true,
+            status: "granted",
+            latitude,
+            longitude,
+            locationName,
+            error: ""
+          });
+          store.locationSyncStatus = `GPS Ready (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`;
+
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3500);
+            const resp = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
+              { signal: controller.signal }
+            );
+            clearTimeout(timer);
+            if (resp.ok) {
+              const data = await resp.json();
+              const city =
+                data?.address?.city ||
+                data?.address?.town ||
+                data?.address?.village ||
+                data?.address?.state_district ||
+                data?.address?.state;
+              const state = data?.address?.state;
+              if (city) {
+                locationName = state && city !== state ? `${city}, ${state}` : city;
+                setPreLoginLocation({ locationName });
+                store.locationSyncStatus = `GPS Ready • ${locationName}`;
+              }
+            }
+          } catch {}
+
+          activePreLoginLocPromise = null;
+          resolve({ granted: true, latitude, longitude, locationName });
+        },
+        (err) => {
+          let errorMsg = "Please turn on device Location / GPS and allow browser permission before logging in.";
+          let status = "error";
+          if (err?.code === 1) {
+            status = "denied";
+            errorMsg =
+              "Location permission was denied. Please click the 🔒 icon in your browser address bar, allow Location, and tap 'Enable Location'.";
+          } else if (err?.code === 2) {
+            errorMsg = "Device Location / GPS appears to be turned off. Please turn on Location in device settings and retry.";
+          } else if (err?.code === 3) {
+            errorMsg = "Location lookup timed out. Make sure GPS is ON and tap 'Enable Location'.";
+          }
+          setPreLoginLocation({
+            granted: false,
+            status,
+            error: options.autoOnLoad && err?.code === 1 ? errorMsg : errorMsg
+          });
+          activePreLoginLocPromise = null;
+          resolve({ granted: false, error: errorMsg });
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    });
+
+    return activePreLoginLocPromise;
+  },
+
   async signIn() {
     await api.signInWithGoogle();
   },
@@ -1160,6 +1265,11 @@ window.addEventListener("beforeunload", () => {
       startUserSubscriptions(user);
     } else {
       clearDataSubscriptions();
+      preLoginLocationSyncedForUid = null;
+      if (!autoPreLoginLocAttempted) {
+        autoPreLoginLocAttempted = true;
+        actions.requestPreLoginLocation({ autoOnLoad: true });
+      }
     }
   });
 })();
